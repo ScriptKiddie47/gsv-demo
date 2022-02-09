@@ -31,10 +31,13 @@ public class UserDaoServiceCommandLineRunner implements CommandLineRunner {
 
 	@Override
 	public void run(String... args) throws Exception {
+		
+		//TODO : Loop through a different file systems
+		
 		processSpreadsheets.getSpreadsheetData();
 		daoService.createTable(GsvConstants.tableData.get(0));
 		handle();
-		log.info("New User is Created");
+		log.info("New Job User is Created");
 	}
 	
 	public void handle() throws Exception{

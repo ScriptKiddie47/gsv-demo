@@ -9,6 +9,11 @@ spring:
   batch:
       job:
         enabled : false
+logging:
+  level:
+    org:
+      hibernate:
+        SQL: ERROR
 #  jpa:
 #    spring.jpa.database-platform: org.hibernate.dialect.H2Dial  ect
 #spring.batch.job.enabled: false
