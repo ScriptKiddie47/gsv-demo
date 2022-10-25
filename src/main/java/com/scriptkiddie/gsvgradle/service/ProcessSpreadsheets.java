@@ -1,92 +1,104 @@
 package com.scriptkiddie.gsvgradle.service;
 
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.InputStream;
 import java.util.Iterator;
 
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.xssf.usermodel.XSSFSheet;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.json.JSONArray;
+import javax.xml.parsers.ParserConfigurationException;
+
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.util.XMLHelper;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.xssf.model.SharedStringsTable;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.xml.sax.ContentHandler;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
 
 import com.scriptkiddie.gsvgradle.util.GsvConstants;
 
 @Service
 public class ProcessSpreadsheets {
 
-	
 	private static final Logger log = LoggerFactory.getLogger(ProcessSpreadsheets.class);
 
-	
-	public void getSpreadsheetData() {
-		JSONObject jsonObject = null;
-		try (FileInputStream file = new FileInputStream(
-				new File("/home/sbala/Documents/DataSets/Historicalinvesttemp.xlsx"));
-				XSSFWorkbook workbook = new XSSFWorkbook(file);) {
+	public void getSpreadsheetData(String filePath, String rowsToSkip) {
 
-			// Get first/desired sheet from the workbook
-			XSSFSheet sheet = workbook.getSheetAt(0);
+		// [1] Clear table data list
+		GsvConstants.tableData.clear();
 
-			// Iterate through each rows one by one
-			Iterator<Row> rowIterator = sheet.iterator();
-			String tableName = "Historicalinvesttemp"+"_TBL";
-			processFirstRow(rowIterator.next(),tableName); // Skip First Row //Minor Risk of getting an empty sheet.
-			
-			while (rowIterator.hasNext()) {
-				Row row = rowIterator.next();
-				
-				Iterator<Cell> cellIterator = row.cellIterator();
-				
-				int counter = 0;
-				jsonObject = new JSONObject();
-				while (cellIterator.hasNext()) {
-					Cell cell = cellIterator.next();
-					switch (cell.getCellType()) {
-					case BLANK:
-						break;
-					case BOOLEAN:
-						break;
-					case ERROR:
-						break;
-					case FORMULA:
-						break;
-					case NUMERIC:
-						jsonObject.put(Integer.toString(++counter),Double.toString(cell.getNumericCellValue()));
-						break;
-					case STRING:
-						jsonObject.put(Integer.toString(++counter),cell.getStringCellValue());
-						break;
-					case _NONE:
-						break;
-					default:
-						counter++;
-						break;
-					}
-				}
-				if (!jsonObject.isEmpty()) {
-					jsonObject.put("0",tableName);
-					GsvConstants.tableData.add(jsonObject);
-					//log.info(jsonObject.toString());
-				}
-			}
+		// [2] Set Rows to Skip
+		GsvConstants.RowsToSkip = Integer.parseInt(rowsToSkip);
+
+		// [3] Clear 
+
+		try {
+			processAllSheets(filePath);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+		processFirstRow(filePath);
+		log.info("Table Data:" + GsvConstants.tableData);
+		log.info("Table Meta Data:" + GsvConstants.tableMetaData);
 	}
 
-	private void processFirstRow(Row firstRow, String tableName) {
+	/**
+	 * @param filePath
+	 *                 Even though the method name is processAllSheets , we only
+	 *                 process the 1st sheet of any given excel file.
+	 *                 Techinique used : XSSF and SAX (Event API)
+	 *                 https://poi.apache.org/components/spreadsheet/how-to.html
+	 */
+	private void processAllSheets(String filePath) throws Exception {
+		log.info("Rows to Skip : " + GsvConstants.RowsToSkip);
+
+		OPCPackage pkg = OPCPackage.open(filePath);
+		XSSFReader r = new XSSFReader(pkg);
+		SharedStringsTable sst = (SharedStringsTable) r.getSharedStringsTable();
+		XMLReader parser = fetchSheetParser(sst);
+		Iterator<InputStream> sheets = r.getSheetsData();
+		while (sheets.hasNext()) {
+			System.out.println("Processing new sheet:\n");
+			InputStream sheet = sheets.next();
+			InputSource sheetSource = new InputSource(sheet);
+			parser.parse(sheetSource);
+			sheet.close();
+			System.out.println("Sheet Processed");
+			break; // Breaks after processing the 1st sheet.
+		}
+	}
+
+	public XMLReader fetchSheetParser(SharedStringsTable sst) throws SAXException, ParserConfigurationException {
+		XMLReader parser = XMLHelper.newXMLReader();
+		ContentHandler handler = new SheetHandler(sst);
+		parser.setContentHandler(handler);
+		return parser;
+	}
+
+	private String getMeATableName(String f) {
+		String[] words = f.split("\\\\");
+		for (String s : words) {
+			if (s.contains(".xlsx")) {
+				return s.replace(".xlsx", "").replace("-", "_").replace(" ","") + "_TBL";
+			}
+		}
+		return null;
+	}
+
+	private void processFirstRow(String filePath) {
+		String tableName = getMeATableName(filePath);
+		GsvConstants.TABLENAME = tableName;
 		JSONObject jsonObject = new JSONObject();
-		Iterator<Cell> cellIterator = firstRow.cellIterator();
-		int counter = 0;
-		jsonObject.put("0",tableName);
-		while (cellIterator.hasNext()) jsonObject.put(Integer.toString(++counter), cellIterator.next().getStringCellValue().replace(".", "_").replace(" ","_"));
-		GsvConstants.tableData.add(jsonObject);
-		GsvConstants.tableMetaData.put(tableName, jsonObject);
-		log.info("TABLE STRUCTURE : " + GsvConstants.tableMetaData.toString());
+		JSONObject jsonObject2 = GsvConstants.tableData.get(0);
+		jsonObject.put("0", tableName);
+		jsonObject2.keySet().forEach(keyStr -> {
+			Object keyvalue = jsonObject2.get(keyStr);
+			int n = Integer.parseInt(keyStr);
+			jsonObject.put(Integer.toString(n+1), keyvalue);
+		});
+		GsvConstants.tableMetaData.put(jsonObject);
 	}
 }
